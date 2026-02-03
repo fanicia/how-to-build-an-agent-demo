@@ -20,4 +20,3 @@ The agent has access to three tools:
 - `read_file` - Read file contents
 - `list_files` - List files in the current directory
 - `edit_file` - Create or edit files via string replacement
-A repo following Thorsten Ball's blog post here: https://ampcode.com/how-to-build-an-agent

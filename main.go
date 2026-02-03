@@ -7,10 +7,21 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"strings"
 
 	"google.golang.org/genai"
 )
+
+const systemPrompt = `You are an autonomous coding agent. When given a task:
+1. Break it down into steps
+2. Execute each step using your tools
+3. Verify your work by reading files you created/edited
+4. Run commands to test that code works when appropriate
+5. Keep going until the task is fully complete
+6. Only respond with a final message when you're confident the task is done
+
+Be thorough but concise. If something fails, debug and fix it.`
 
 type Agent struct {
 	client       *genai.Client
@@ -73,6 +84,20 @@ var tools = []*genai.Tool{
 					Required: []string{"path", "old_str", "new_str"},
 				},
 			},
+			{
+				Name:        "run_command",
+				Description: "Run a shell command and return its output. Use this to run code, tests, or verify your work.",
+				Parameters: &genai.Schema{
+					Type: genai.TypeObject,
+					Properties: map[string]*genai.Schema{
+						"command": {
+							Type:        genai.TypeString,
+							Description: "The shell command to run",
+						},
+					},
+					Required: []string{"command"},
+				},
+			},
 		},
 	},
 }
@@ -132,6 +157,15 @@ func createNewFile(path, content string) string {
 	return "OK"
 }
 
+func RunCommand(command string) string {
+	cmd := exec.Command("bash", "-c", command)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Sprintf("%s\nError: %v", string(output), err)
+	}
+	return string(output)
+}
+
 func (a *Agent) executeTool(name string, args map[string]any) string {
 	switch name {
 	case "read_file":
@@ -146,6 +180,9 @@ func (a *Agent) executeTool(name string, args map[string]any) string {
 		oldStr, _ := args["old_str"].(string)
 		newStr, _ := args["new_str"].(string)
 		return EditFile(path, oldStr, newStr)
+	case "run_command":
+		command, _ := args["command"].(string)
+		return RunCommand(command)
 	default:
 		return fmt.Sprintf("Unknown tool: %s", name)
 	}
@@ -153,10 +190,11 @@ func (a *Agent) executeTool(name string, args map[string]any) string {
 
 func (a *Agent) runInference(ctx context.Context) (*genai.GenerateContentResponse, error) {
 	config := &genai.GenerateContentConfig{
-		Tools: a.tools,
+		Tools:             a.tools,
+		SystemInstruction: genai.NewContentFromText(systemPrompt, genai.RoleUser),
 	}
 
-	return a.client.Models.GenerateContent(ctx, "gemini-2.5-flash", a.conversation, config)
+	return a.client.Models.GenerateContent(ctx, "gemini-flash-latest", a.conversation, config)
 }
 
 func (a *Agent) Run(ctx context.Context, userMessage string) (string, error) {
